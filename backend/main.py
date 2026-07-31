@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 import separation
 from models import JobRecord
 
-app = FastAPI(title="DAU stem-separation service")
+app = FastAPI(title="MyDAW stem-separation service")
 
 app.add_middleware(
     CORSMiddleware,

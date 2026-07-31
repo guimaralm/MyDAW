@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { bufferCache } from '../../audio-engine/bufferCache'
-import { computePeaks } from '../../audio-engine/waveformPeaks'
+import { getCachedPeaks, normalizationScale } from '../../audio-engine/waveformPeaks'
 import type { Clip } from '../../types/project'
 
 interface ClipBoxProps {
@@ -8,6 +8,8 @@ interface ClipBoxProps {
   pps: number
   height: number
   selected: boolean
+  /** Lane colour, derived from the stem kind. */
+  color: string
   snap: (time: number) => number
   /** Active range selection, if it belongs to this clip (absolute timeline seconds). */
   selectionRange: { start: number; end: number } | null
@@ -29,6 +31,7 @@ function ClipBoxImpl({
   pps,
   height,
   selected,
+  color,
   snap,
   selectionRange,
   onClipClick,
@@ -59,15 +62,37 @@ function ClipBoxImpl({
     if (!ctx) return
     ctx.scale(dpr, dpr)
     ctx.clearRect(0, 0, w, h)
-    const peaks = computePeaks(buffer, clip.bufferOffset, clip.duration, w)
-    ctx.fillStyle = clip.muted ? '#4b4b52' : '#c084fc'
+
+    const peaks = getCachedPeaks(clip.bufferId, buffer, clip.bufferOffset, clip.duration, w)
+    // Separated stems peak far below full scale, so raw amplitude draws as a flat line.
+    // Normalizing to the clip's own peak is what makes the audio readable.
+    const scale = normalizationScale(peaks.peak)
     const mid = h / 2
+    const inset = 6 // keep the waveform off the clip's border
+    const half = Math.max(2, mid - inset)
+
+    const waveColor = clip.muted ? '#5a5a63' : color
+    const gradient = ctx.createLinearGradient(0, mid - half, 0, mid + half)
+    gradient.addColorStop(0, waveColor)
+    gradient.addColorStop(0.5, waveColor)
+    gradient.addColorStop(1, waveColor)
+    ctx.fillStyle = gradient
+    ctx.globalAlpha = clip.muted ? 0.5 : 0.95
+
     for (let x = 0; x < w; x++) {
-      const top = mid - peaks.max[x] * mid
-      const bottom = mid - peaks.min[x] * mid
+      const hi = Math.max(-1, Math.min(1, peaks.max[x] * scale))
+      const lo = Math.max(-1, Math.min(1, peaks.min[x] * scale))
+      const top = mid - hi * half
+      const bottom = mid - lo * half
       ctx.fillRect(x, top, 1, Math.max(1, bottom - top))
     }
-  }, [clip.bufferId, clip.bufferOffset, clip.duration, clip.muted, width, height])
+
+    // Centre axis, so silence still reads as a line rather than an empty box.
+    ctx.globalAlpha = 0.25
+    ctx.fillStyle = waveColor
+    ctx.fillRect(0, mid, w, 1)
+    ctx.globalAlpha = 1
+  }, [clip.bufferId, clip.bufferOffset, clip.duration, clip.muted, color, width, height])
 
   function timeAtClientX(clientX: number): number {
     const rect = boxRef.current!.getBoundingClientRect()
@@ -170,9 +195,9 @@ function ClipBoxImpl({
       onPointerDown={handlePointerDown}
       onContextMenu={handleContextMenu}
       style={{ left: renderLeft, width: renderWidth, height, cursor: 'text' }}
-      className={`absolute top-0 overflow-hidden rounded border ${
-        selected ? 'border-purple-300' : 'border-neutral-700'
-      } ${clip.muted ? 'bg-neutral-800/60' : 'bg-neutral-900/80'}`}
+      className={`group absolute top-0 overflow-hidden rounded-md border transition-colors ${
+        selected ? 'border-[var(--accent)] ring-1 ring-inset ring-[var(--accent)]/40' : 'border-[var(--border-strong)]'
+      } ${clip.muted ? 'bg-[var(--bg-app)]/70' : 'bg-[var(--bg-raised)]/60'}`}
     >
       <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
 
@@ -187,31 +212,32 @@ function ClipBoxImpl({
 
       {band && bandWidth > 0 && (
         <div
-          className="pointer-events-none absolute top-0 border-x border-purple-300 bg-purple-400/30"
+          className="pointer-events-none absolute top-0 border-x border-[var(--accent)] bg-[var(--accent)]/25"
           style={{ left: bandLeft, width: bandWidth, height }}
         />
       )}
 
+      {/* Fade handles only on hover — at rest they read as stray dots on the waveform. */}
       {showFadeHandles && (
         <>
           <div
             onPointerDown={(e) => beginFadeDrag(e, 'in')}
-            className="absolute top-0 z-10 h-3 w-3 -translate-x-1/2 cursor-ew-resize rounded-full border border-white/70 bg-purple-400"
-            style={{ left: Math.max(4, fadeInPx) }}
+            className="absolute top-1 z-10 h-2.5 w-2.5 -translate-x-1/2 cursor-ew-resize rounded-full border border-white/80 bg-white/90 opacity-0 transition-opacity group-hover:opacity-100"
+            style={{ left: Math.max(5, fadeInPx) }}
             title="Fade in"
           />
           <div
             onPointerDown={(e) => beginFadeDrag(e, 'out')}
-            className="absolute top-0 z-10 h-3 w-3 -translate-x-1/2 cursor-ew-resize rounded-full border border-white/70 bg-purple-400"
-            style={{ left: Math.min(renderWidth - 4, renderWidth - fadeOutPx) }}
+            className="absolute top-1 z-10 h-2.5 w-2.5 -translate-x-1/2 cursor-ew-resize rounded-full border border-white/80 bg-white/90 opacity-0 transition-opacity group-hover:opacity-100"
+            style={{ left: Math.min(renderWidth - 5, renderWidth - fadeOutPx) }}
             title="Fade out"
           />
         </>
       )}
 
       {clip.muted && (
-        <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] text-neutral-400">
-          🔇 silenciado
+        <span className="pointer-events-none absolute inset-0 flex items-center justify-center gap-1 text-[10px] text-[var(--text-faint)]">
+          Silenced
         </span>
       )}
     </div>

@@ -1,6 +1,8 @@
 export interface Peaks {
   min: Float32Array
   max: Float32Array
+  /** Largest absolute excursion in the analysed range — used to normalize the drawing. */
+  peak: number
 }
 
 interface CompositeClip {
@@ -9,6 +11,24 @@ interface CompositeClip {
   bufferOffset: number
   duration: number
   muted: boolean
+}
+
+/**
+ * Below this peak we treat the material as silence and stop normalizing, so room tone and
+ * dither noise aren't blown up into a solid wall of "audio" that isn't there.
+ */
+const SILENCE_FLOOR = 0.02
+/** Never magnify more than this, so a near-silent clip stays visibly quiet. */
+const MAX_GAIN = 12
+
+/**
+ * Display gain for a waveform with the given peak. Separated stems are far quieter than a
+ * full mix (a vocal stem often peaks near 0.05), so drawing raw amplitude renders them as a
+ * flat line. Normalizing per clip is what makes the audio actually readable.
+ */
+export function normalizationScale(peak: number): number {
+  if (peak <= SILENCE_FLOOR) return 1
+  return Math.min(MAX_GAIN, 1 / peak)
 }
 
 /**
@@ -24,8 +44,9 @@ export function computeCompositePeaks(
 ): Peaks {
   const min = new Float32Array(numColumns)
   const max = new Float32Array(numColumns)
-  if (numColumns <= 0 || duration <= 0) return { min, max }
+  if (numColumns <= 0 || duration <= 0) return { min, max, peak: 0 }
   const colsPerSec = numColumns / duration
+  let peak = 0
 
   for (const clip of clips) {
     if (clip.muted) continue
@@ -41,8 +62,9 @@ export function computeCompositePeaks(
       if (clipPeaks.min[i] < min[col]) min[col] = clipPeaks.min[i]
       if (clipPeaks.max[i] > max[col]) max[col] = clipPeaks.max[i]
     }
+    if (clipPeaks.peak > peak) peak = clipPeaks.peak
   }
-  return { min, max }
+  return { min, max, peak }
 }
 
 /**
@@ -57,7 +79,7 @@ export function computePeaks(
 ): Peaks {
   const min = new Float32Array(numColumns)
   const max = new Float32Array(numColumns)
-  if (numColumns <= 0) return { min, max }
+  if (numColumns <= 0) return { min, max, peak: 0 }
 
   const sr = buffer.sampleRate
   const channels: Float32Array[] = []
@@ -67,6 +89,7 @@ export function computePeaks(
   const endSample = Math.min(buffer.length, Math.ceil((startSec + durationSec) * sr))
   const totalSamples = Math.max(1, endSample - startSample)
   const samplesPerColumn = totalSamples / numColumns
+  let peak = 0
 
   for (let col = 0; col < numColumns; col++) {
     const from = startSample + Math.floor(col * samplesPerColumn)
@@ -82,6 +105,37 @@ export function computePeaks(
     }
     min[col] = lo
     max[col] = hi
+    if (-lo > peak) peak = -lo
+    if (hi > peak) peak = hi
   }
-  return { min, max }
+  return { min, max, peak }
+}
+
+// Scanning a multi-minute buffer per redraw is expensive, and redraws happen on every zoom,
+// scroll and selection change. Cache by the exact slice + pixel width being drawn.
+const peaksCache = new Map<string, Peaks>()
+const MAX_CACHE_ENTRIES = 200
+
+/** Cached `computePeaks` for a clip's slice. `bufferId` identifies the source buffer. */
+export function getCachedPeaks(
+  bufferId: string,
+  buffer: AudioBuffer,
+  startSec: number,
+  durationSec: number,
+  numColumns: number,
+): Peaks {
+  const key = `${bufferId}|${startSec.toFixed(4)}|${durationSec.toFixed(4)}|${numColumns}`
+  const hit = peaksCache.get(key)
+  if (hit) return hit
+  const computed = computePeaks(buffer, startSec, durationSec, numColumns)
+  if (peaksCache.size >= MAX_CACHE_ENTRIES) {
+    const oldest = peaksCache.keys().next().value
+    if (oldest !== undefined) peaksCache.delete(oldest)
+  }
+  peaksCache.set(key, computed)
+  return computed
+}
+
+export function clearPeaksCache(): void {
+  peaksCache.clear()
 }

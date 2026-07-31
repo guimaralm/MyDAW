@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button, ToolbarDivider } from '../ui/Button'
 
 interface TransportBarProps {
   isPlaying: boolean
   currentTime: number
   duration: number
   loopEnabled: boolean
+  hasLoopRegion: boolean
   onTogglePlay: () => void
   onSeek: (seconds: number) => void
   onToggleLoop: () => void
@@ -16,7 +18,7 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-/** Parse "m:ss", "ss", or a decimal number of seconds into seconds; null if unparseable. */
+/** Accepts "m:ss", bare seconds, or a decimal. Returns null when unparseable. */
 function parseTime(text: string): number | null {
   const trimmed = text.trim()
   if (!trimmed) return null
@@ -36,6 +38,7 @@ export function TransportBar({
   currentTime,
   duration,
   loopEnabled,
+  hasLoopRegion,
   onTogglePlay,
   onSeek,
   onToggleLoop,
@@ -44,8 +47,8 @@ export function TransportBar({
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // While not editing, the field mirrors the live playhead. Once focused it holds the user's
-  // typed value so the 60fps playhead updates don't overwrite what they're typing.
+  // While not editing the field mirrors the live playhead; once focused it holds what the
+  // user typed so 60fps updates don't overwrite it mid-keystroke.
   useEffect(() => {
     if (!editing) setDraft(formatTime(currentTime))
   }, [currentTime, editing])
@@ -57,23 +60,27 @@ export function TransportBar({
   }
 
   return (
-    <div className="flex items-center gap-2 rounded bg-neutral-900 px-4 py-2">
-      <button
-        type="button"
-        onClick={() => onSeek(0)}
-        className="rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-200 hover:bg-neutral-700"
-        title="Volver al inicio"
-      >
+    <footer className="flex h-14 shrink-0 items-center gap-2 border-t border-[var(--border)] bg-[var(--bg-panel)] px-3">
+      <Button variant="ghost" onClick={() => onSeek(0)} title="Back to start (Home)">
         ⏮
-      </button>
+      </Button>
       <button
         type="button"
         onClick={onTogglePlay}
-        className="rounded bg-purple-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-purple-500"
+        title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+        className="grid h-9 w-9 place-items-center rounded-full bg-[var(--accent)] text-white transition-colors hover:bg-[var(--accent-hover)]"
       >
-        {isPlaying ? 'Pause' : 'Play'}
+        {isPlaying ? (
+          <span className="flex gap-[3px]">
+            <span className="block h-3.5 w-[3px] rounded-[1px] bg-current" />
+            <span className="block h-3.5 w-[3px] rounded-[1px] bg-current" />
+          </span>
+        ) : (
+          <span className="ml-[2px] block h-0 w-0 border-y-[7px] border-l-[11px] border-y-transparent border-l-current" />
+        )}
       </button>
-      <span className="ml-1 font-mono text-xs text-neutral-400">
+
+      <div className="ml-1 flex items-baseline gap-1.5">
         <input
           ref={inputRef}
           value={draft}
@@ -95,22 +102,25 @@ export function TransportBar({
               inputRef.current?.blur()
             }
           }}
-          className="w-12 rounded bg-neutral-800 px-1 py-0.5 text-right text-neutral-200 focus:outline-none focus:ring-1 focus:ring-purple-400"
-          title="Editá la posición (m:ss) y Enter para saltar ahí"
+          className="tnum w-16 rounded-md bg-[var(--bg-app)] px-2 py-1 text-right text-base text-[var(--text)] focus:outline focus:outline-1 focus:outline-[var(--accent)]"
+          title="Type a position (m:ss) and press Enter"
         />
-        {' / '}
-        {formatTime(duration)}
-      </span>
-      <button
-        type="button"
+        <span className="tnum text-xs text-[var(--text-faint)]">/ {formatTime(duration)}</span>
+      </div>
+
+      <ToolbarDivider />
+      <Button
+        variant="default"
+        size="sm"
+        active={loopEnabled}
         onClick={onToggleLoop}
-        className={`ml-auto rounded px-3 py-1.5 text-sm ${
-          loopEnabled ? 'bg-purple-600 text-white' : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
-        }`}
-        title="Reproducir en bucle la región de loop"
+        title={hasLoopRegion ? 'Loop the marked region' : 'Shift+drag on the timeline to mark a loop region'}
       >
-        🔁 Loop
-      </button>
-    </div>
+        Loop
+      </Button>
+      {!hasLoopRegion && loopEnabled && (
+        <span className="text-[10px] text-[var(--text-faint)]">shift+drag to set a region</span>
+      )}
+    </footer>
   )
 }

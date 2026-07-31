@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { bufferCache } from '../../audio-engine/bufferCache'
-import { computeCompositePeaks } from '../../audio-engine/waveformPeaks'
+import { computeCompositePeaks, normalizationScale } from '../../audio-engine/waveformPeaks'
 import type { Clip } from '../../types/project'
 
 interface CropModalProps {
@@ -70,11 +70,15 @@ export function CropModal({
     ctx.scale(dpr, dpr)
     ctx.clearRect(0, 0, WAVE_W, WAVE_H)
     const peaks = computeCompositePeaks(clips, duration, WAVE_W, (id) => bufferCache.get(id))
+    const scale = normalizationScale(peaks.peak)
     ctx.fillStyle = '#c084fc'
     const mid = WAVE_H / 2
+    const half = mid - 8
     for (let x = 0; x < WAVE_W; x++) {
-      const top = mid - peaks.max[x] * mid
-      const bottom = mid - peaks.min[x] * mid
+      const hi = Math.max(-1, Math.min(1, peaks.max[x] * scale))
+      const lo = Math.max(-1, Math.min(1, peaks.min[x] * scale))
+      const top = mid - hi * half
+      const bottom = mid - lo * half
       ctx.fillRect(x, top, 1, Math.max(1, bottom - top))
     }
   }, [clips, duration])

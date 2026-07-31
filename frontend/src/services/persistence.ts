@@ -28,19 +28,19 @@ interface StoredBuffer {
   numberOfChannels: number
 }
 
-interface DauDb extends DBSchema {
+interface MyDawDb extends DBSchema {
   projects: { key: string; value: ProjectRecord }
   blobs: { key: string; value: StoredBuffer }
 }
 
-const DB_NAME = 'dau-projects'
+const DB_NAME = 'mydaw-projects'
 const DB_VERSION = 1
 
-let dbPromise: Promise<IDBPDatabase<DauDb>> | null = null
+let dbPromise: Promise<IDBPDatabase<MyDawDb>> | null = null
 
-function getDb(): Promise<IDBPDatabase<DauDb>> {
+function getDb(): Promise<IDBPDatabase<MyDawDb>> {
   if (!dbPromise) {
-    dbPromise = openDB<DauDb>(DB_NAME, DB_VERSION, {
+    dbPromise = openDB<MyDawDb>(DB_NAME, DB_VERSION, {
       upgrade(db) {
         if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' })
         if (!db.objectStoreNames.contains('blobs')) db.createObjectStore('blobs')

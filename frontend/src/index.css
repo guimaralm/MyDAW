@@ -1,7 +1,30 @@
 @import "tailwindcss";
 
+/*
+ * Layered surfaces: the app never uses one flat grey. Depth reads as
+ * app < panel < lane < clip, with low-contrast hairlines between them.
+ */
 :root {
   color-scheme: dark;
+
+  --bg-app: #0b0c10;
+  --bg-panel: #13151c;
+  --bg-lane: #0f1117;
+  --bg-raised: #1b1e27;
+  --bg-raised-hover: #232733;
+
+  --border: #23262f;
+  --border-strong: #333846;
+
+  --text: #e7e8ec;
+  --text-dim: #98a0ae;
+  --text-faint: #5f6775;
+
+  --accent: #a855f7;
+  --accent-hover: #b571f8;
+  --accent-soft: rgba(168, 85, 247, 0.15);
+  --danger: #f0616d;
+  --warn: #f5a623;
 }
 
 html, body, #root {
@@ -10,7 +33,26 @@ html, body, #root {
 }
 
 body {
-  background: #16171d;
-  color: #e5e4e7;
-  font: 14px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg-app);
+  color: var(--text);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* the app is a fixed-height shell; scrolling lives inside panes */
 }
+
+/* Numeric readouts (time, dB, LUFS) must not jitter as they update. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* Slim scrollbars so inner panes don't look like web pages. */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: #2b2f3a;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: #3a3f4d; background-clip: content-box; }

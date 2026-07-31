@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { audioEngine } from './audio-engine/AudioEngine'
 import { bufferCache } from './audio-engine/bufferCache'
 import { renderMix } from './audio-engine/offlineRender'
-import { ExportDialog } from './components/ExportDialog/ExportDialog'
-import { ImportPanel } from './components/ImportPanel/ImportPanel'
-import { StemJobPanel } from './components/ImportPanel/StemJobPanel'
 import { MasteringPanel } from './components/MasteringPanel/MasteringPanel'
 import { ProjectPanel } from './components/ProjectPanel/ProjectPanel'
+import { ShortcutsDialog } from './components/Shell/ShortcutsDialog'
+import { TopBar } from './components/Shell/TopBar'
+import { WelcomeScreen } from './components/Shell/WelcomeScreen'
 import { ArrangementView, type RangeSelection } from './components/Timeline/ArrangementView'
 import { ClipInspector } from './components/Timeline/ClipInspector'
 import { ContextMenu, type MenuItem } from './components/Timeline/ContextMenu'
@@ -69,23 +69,30 @@ function App() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; clipId: string; time: number } | null>(null)
   const [bypassed, setBypassed] = useState(false)
   const [loop, setLoop] = useState<LoopRegion>({ enabled: false, start: 0, end: 0 })
-  const [showImport, setShowImport] = useState(true)
   const [showCropModal, setShowCropModal] = useState(false)
+  const [showMastering, setShowMastering] = useState(true)
+  const [showProjects, setShowProjects] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
+  const [forceImport, setForceImport] = useState(false)
+  const [exporting, setExporting] = useState<'wav' | 'mp3' | null>(null)
 
   const rafRef = useRef<number | null>(null)
   const loopRef = useRef(loop)
   loopRef.current = loop
 
   const selectedClip = clips.find((c) => c.id === selectedClipId) ?? null
+  const hasAudio = tracks.length > 0
+  // The welcome screen owns the window whenever there's nothing to work on — and comes back
+  // if every track is removed, instead of leaving the user with no way to import.
+  const showWelcome = !hasAudio || forceImport
 
   useEffect(() => {
     audioEngine.setClips(clips)
     setDuration(audioEngine.getDuration())
   }, [clips])
 
-  // Collapse the big import dropzone once there's material to work on; the timeline is king.
   useEffect(() => {
-    if (tracks.length > 0) setShowImport(false)
+    if (tracks.length > 0) setForceImport(false)
   }, [tracks.length])
 
   async function addTrackFromStem(fileNameLabel: string, stemFile: File) {
@@ -122,7 +129,7 @@ function App() {
           onUpdate: (j) => updateStemJob(localJobId, { status: j.status }),
         })
         if (finalJob.status === 'error') {
-          updateStemJob(localJobId, { status: 'error', error: finalJob.error ?? 'error desconocido' })
+          updateStemJob(localJobId, { status: 'error', error: finalJob.error ?? 'unknown error' })
           continue
         }
         for (const stemName of finalJob.stems ?? []) {
@@ -219,7 +226,7 @@ function App() {
     const source = tracks.find((t) => t.id === clip.trackId)
     const newTrackId = crypto.randomUUID()
     audioEngine.addTrack(newTrackId, source?.volume ?? 1, source?.pan ?? 0)
-    moveRangeToNewTrack(clip.trackId, a, b, newTrackId, source ? `${source.name} (movido)` : 'movido', [
+    moveRangeToNewTrack(clip.trackId, a, b, newTrackId, source ? `${source.name} (moved)` : 'moved', [
       crypto.randomUUID(),
       crypto.randomUUID(),
     ])
@@ -236,8 +243,7 @@ function App() {
     const source = tracks.find((t) => t.id === clip.trackId)
     const newTrackId = crypto.randomUUID()
     audioEngine.addTrack(newTrackId, source?.volume ?? 1, source?.pan ?? 0)
-    // Same time position on a fresh lane.
-    moveClipToNewTrack(clipId, newTrackId, source ? `${source.name} (movido)` : 'movido', clip.timelineStart)
+    moveClipToNewTrack(clipId, newTrackId, source ? `${source.name} (moved)` : 'moved', clip.timelineStart)
   }
 
   function buildContextMenuItems(clipId: string, time: number): MenuItem[] {
@@ -246,19 +252,19 @@ function App() {
     if (selection && selection.clipId === clipId && selection.end - selection.start > 0.01) {
       const { start, end } = selection
       items.push(
-        { label: 'Mover selección a pista nueva', onClick: () => actMoveRangeToNewTrack(clipId, start, end) },
-        { label: 'Silenciar selección', onClick: () => actSilenceRange(clipId, start, end) },
-        { label: 'Borrar selección', onClick: () => actDeleteRange(clipId, start, end), danger: true },
+        { label: 'Move selection to new track', onClick: () => actMoveRangeToNewTrack(clipId, start, end) },
+        { label: 'Silence selection', onClick: () => actSilenceRange(clipId, start, end) },
+        { label: 'Delete selection', onClick: () => actDeleteRange(clipId, start, end), danger: true },
       )
     }
     items.push(
-      { label: 'Dividir aquí', onClick: () => actSplitAt(clipId, time) },
-      { label: 'Mover pieza a pista nueva', onClick: () => actMoveClipToNewTrack(clipId) },
+      { label: 'Split here', onClick: () => actSplitAt(clipId, time) },
+      { label: 'Move piece to new track', onClick: () => actMoveClipToNewTrack(clipId) },
       {
-        label: clip?.muted ? 'Activar sonido de la pieza' : 'Silenciar pieza',
+        label: clip?.muted ? 'Unmute piece' : 'Silence piece',
         onClick: () => setClipMuted(clipId, !clip?.muted),
       },
-      { label: 'Borrar pieza', onClick: () => handleDeleteClip(clipId), danger: true },
+      { label: 'Delete piece', onClick: () => handleDeleteClip(clipId), danger: true },
     )
     return items
   }
@@ -393,14 +399,24 @@ function App() {
   }, [clips, selectedClipId, selection, isPlaying])
 
   async function handleExportWav() {
-    const buffer = await renderMix(tracks, clips, mastering)
-    downloadBlob(audioBufferToWavBlob(buffer), 'mezcla.wav')
+    setExporting('wav')
+    try {
+      const buffer = await renderMix(tracks, clips, mastering)
+      downloadBlob(audioBufferToWavBlob(buffer), 'mix.wav')
+    } finally {
+      setExporting(null)
+    }
   }
 
   async function handleExportMp3() {
-    const buffer = await renderMix(tracks, clips, mastering)
-    const blob = await audioBufferToMp3Blob(buffer)
-    downloadBlob(blob, 'mezcla.mp3')
+    setExporting('mp3')
+    try {
+      const buffer = await renderMix(tracks, clips, mastering)
+      const blob = await audioBufferToMp3Blob(buffer)
+      downloadBlob(blob, 'mix.mp3')
+    } finally {
+      setExporting(null)
+    }
   }
 
   async function handleSaveProject(name: string) {
@@ -459,6 +475,7 @@ function App() {
     setSelection(null)
     setContextMenu(null)
     setCurrentTime(0)
+    setShowProjects(false)
   }
 
   async function handleDeleteProject(id: string) {
@@ -466,73 +483,123 @@ function App() {
   }
 
   return (
-    <div className="mx-auto flex h-full max-w-5xl flex-col gap-3 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-medium text-neutral-200">DAU — mastering DAW</h1>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setShowImport((v) => !v)}
-            className="rounded bg-neutral-800 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
-          >
-            + Importar
-          </button>
-          <button
-            type="button"
-            onClick={() => useProjectStore.temporal.getState().undo()}
-            className="rounded bg-neutral-800 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
-            title="Deshacer (⌘Z)"
-          >
-            Deshacer
-          </button>
-          <button
-            type="button"
-            onClick={() => useProjectStore.temporal.getState().redo()}
-            className="rounded bg-neutral-800 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
-            title="Rehacer (⇧⌘Z)"
-          >
-            Rehacer
-          </button>
-        </div>
-      </div>
+    <div className="flex h-screen flex-col overflow-hidden bg-[var(--bg-app)]">
+      <TopBar
+        hasAudio={hasAudio}
+        exporting={exporting}
+        masteringOpen={showMastering}
+        onImport={() => setForceImport(true)}
+        onUndo={() => useProjectStore.temporal.getState().undo()}
+        onRedo={() => useProjectStore.temporal.getState().redo()}
+        onExportWav={handleExportWav}
+        onExportMp3={handleExportMp3}
+        onToggleMastering={() => setShowMastering((v) => !v)}
+        onOpenProjects={() => setShowProjects(true)}
+        onShowShortcuts={() => setShowShortcuts(true)}
+      />
 
-      {showImport && (
+      {showWelcome ? (
+        <main className="flex-1 overflow-hidden">
+          <WelcomeScreen jobs={stemJobs} onFilesSelected={handleFilesSelected} />
+        </main>
+      ) : (
         <>
-          <ImportPanel onFilesSelected={handleFilesSelected} />
-          <StemJobPanel jobs={stemJobs} />
+          <main className="flex min-h-0 flex-1">
+            <ArrangementView
+              tracks={tracks}
+              clips={clips}
+              currentTime={currentTime}
+              isPlaying={isPlaying}
+              selectedClipId={selectedClipId}
+              selection={selection}
+              loop={loop}
+              onClipClick={handleClipClick}
+              onSelectRange={handleSelectRange}
+              onClipContextMenu={handleClipContextMenu}
+              onSeek={handleSeek}
+              onScrubStart={handleScrubStart}
+              onScrubEnd={handleScrubEnd}
+              onCutAtPlayhead={handleCutAtPlayhead}
+              onTrimLeft={trimClipLeft}
+              onTrimRight={trimClipRight}
+              onFade={setClipFade}
+              onDeleteClip={handleDeleteClip}
+              onVolumeChange={handleVolumeChange}
+              onPanChange={setTrackPan}
+              onToggleMute={toggleTrackMute}
+              onToggleSolo={toggleTrackSolo}
+              onRemoveTrack={handleRemoveTrack}
+              onLoopChange={setLoop}
+              onClearSelection={() => setSelection(null)}
+              onCropToSelection={handleCropToSelection}
+              onCropAllSong={() => setShowCropModal(true)}
+            />
+            {showMastering && (
+              <MasteringPanel
+                eqLowDb={mastering.eqLowDb}
+                eqMidDb={mastering.eqMidDb}
+                eqHighDb={mastering.eqHighDb}
+                compressorThreshold={mastering.compressorThreshold}
+                compressorRatio={mastering.compressorRatio}
+                limiterCeilingDb={mastering.limiterCeilingDb}
+                masterGainDb={mastering.masterGainDb}
+                bypassed={bypassed}
+                momentaryLufs={momentaryLufs}
+                shortTermLufs={shortTermLufs}
+                integratedLufs={integratedLufs}
+                compressorReductionDb={reduction.compressor}
+                limiterReductionDb={reduction.limiter}
+                onToggleBypass={handleToggleBypass}
+                onMasterGainChange={handleMasterGainChange}
+                onEqLowChange={(v) => {
+                  mastering.setEqLowDb(v)
+                  audioEngine.setEqGainDb('low', v)
+                }}
+                onEqMidChange={(v) => {
+                  mastering.setEqMidDb(v)
+                  audioEngine.setEqGainDb('mid', v)
+                }}
+                onEqHighChange={(v) => {
+                  mastering.setEqHighDb(v)
+                  audioEngine.setEqGainDb('high', v)
+                }}
+                onCompressorThresholdChange={(v) => {
+                  mastering.setCompressorThreshold(v)
+                  audioEngine.setCompressorParams({ threshold: v })
+                }}
+                onCompressorRatioChange={(v) => {
+                  mastering.setCompressorRatio(v)
+                  audioEngine.setCompressorParams({ ratio: v })
+                }}
+                onLimiterCeilingChange={(v) => {
+                  mastering.setLimiterCeilingDb(v)
+                  audioEngine.setLimiterCeilingDb(v)
+                }}
+              />
+            )}
+          </main>
+
+          {selectedClip && (
+            <ClipInspector
+              clip={selectedClip}
+              onFadeChange={(fade) => setClipFade(selectedClip.id, fade)}
+              onGainChange={(db) => setClipGainDb(selectedClip.id, db)}
+              onToggleMuted={() => setClipMuted(selectedClip.id, !selectedClip.muted)}
+            />
+          )}
+
+          <TransportBar
+            isPlaying={isPlaying}
+            currentTime={currentTime}
+            duration={duration}
+            loopEnabled={loop.enabled}
+            hasLoopRegion={loop.end - loop.start > 0.01}
+            onTogglePlay={handleTogglePlay}
+            onSeek={handleSeek}
+            onToggleLoop={() => setLoop((l) => ({ ...l, enabled: !l.enabled }))}
+          />
         </>
       )}
-      {!showImport && stemJobs.length > 0 && <StemJobPanel jobs={stemJobs} />}
-
-      <ArrangementView
-        tracks={tracks}
-        clips={clips}
-        currentTime={currentTime}
-        isPlaying={isPlaying}
-        selectedClipId={selectedClipId}
-        selection={selection}
-        loop={loop}
-        onClipClick={handleClipClick}
-        onSelectRange={handleSelectRange}
-        onClipContextMenu={handleClipContextMenu}
-        onSeek={handleSeek}
-        onScrubStart={handleScrubStart}
-        onScrubEnd={handleScrubEnd}
-        onCutAtPlayhead={handleCutAtPlayhead}
-        onTrimLeft={trimClipLeft}
-        onTrimRight={trimClipRight}
-        onFade={setClipFade}
-        onDeleteClip={handleDeleteClip}
-        onVolumeChange={handleVolumeChange}
-        onPanChange={setTrackPan}
-        onToggleMute={toggleTrackMute}
-        onToggleSolo={toggleTrackSolo}
-        onRemoveTrack={handleRemoveTrack}
-        onLoopChange={setLoop}
-        onClearSelection={() => setSelection(null)}
-        onCropToSelection={handleCropToSelection}
-        onCropAllSong={() => setShowCropModal(true)}
-      />
 
       {contextMenu && (
         <ContextMenu
@@ -559,76 +626,24 @@ function App() {
         />
       )}
 
-      {selectedClip && (
-        <ClipInspector
-          clip={selectedClip}
-          onFadeChange={(fade) => setClipFade(selectedClip.id, fade)}
-          onGainChange={(db) => setClipGainDb(selectedClip.id, db)}
-          onToggleMuted={() => setClipMuted(selectedClip.id, !selectedClip.muted)}
-        />
+      {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} />}
+
+      {showProjects && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
+          onPointerDown={() => setShowProjects(false)}
+        >
+          <div className="w-full max-w-md" onPointerDown={(e) => e.stopPropagation()}>
+            <ProjectPanel
+              onSave={handleSaveProject}
+              onLoad={handleLoadProject}
+              onDelete={handleDeleteProject}
+              listProjects={listProjects}
+              disabled={clips.length === 0}
+            />
+          </div>
+        </div>
       )}
-
-      <TransportBar
-        isPlaying={isPlaying}
-        currentTime={currentTime}
-        duration={duration}
-        loopEnabled={loop.enabled}
-        onTogglePlay={handleTogglePlay}
-        onSeek={handleSeek}
-        onToggleLoop={() => setLoop((l) => ({ ...l, enabled: !l.enabled }))}
-      />
-
-      <MasteringPanel
-        eqLowDb={mastering.eqLowDb}
-        eqMidDb={mastering.eqMidDb}
-        eqHighDb={mastering.eqHighDb}
-        compressorThreshold={mastering.compressorThreshold}
-        compressorRatio={mastering.compressorRatio}
-        limiterCeilingDb={mastering.limiterCeilingDb}
-        masterGainDb={mastering.masterGainDb}
-        bypassed={bypassed}
-        momentaryLufs={momentaryLufs}
-        shortTermLufs={shortTermLufs}
-        integratedLufs={integratedLufs}
-        compressorReductionDb={reduction.compressor}
-        limiterReductionDb={reduction.limiter}
-        onToggleBypass={handleToggleBypass}
-        onMasterGainChange={handleMasterGainChange}
-        onEqLowChange={(v) => {
-          mastering.setEqLowDb(v)
-          audioEngine.setEqGainDb('low', v)
-        }}
-        onEqMidChange={(v) => {
-          mastering.setEqMidDb(v)
-          audioEngine.setEqGainDb('mid', v)
-        }}
-        onEqHighChange={(v) => {
-          mastering.setEqHighDb(v)
-          audioEngine.setEqGainDb('high', v)
-        }}
-        onCompressorThresholdChange={(v) => {
-          mastering.setCompressorThreshold(v)
-          audioEngine.setCompressorParams({ threshold: v })
-        }}
-        onCompressorRatioChange={(v) => {
-          mastering.setCompressorRatio(v)
-          audioEngine.setCompressorParams({ ratio: v })
-        }}
-        onLimiterCeilingChange={(v) => {
-          mastering.setLimiterCeilingDb(v)
-          audioEngine.setLimiterCeilingDb(v)
-        }}
-      />
-
-      <ExportDialog onExportWav={handleExportWav} onExportMp3={handleExportMp3} disabled={clips.length === 0} />
-
-      <ProjectPanel
-        onSave={handleSaveProject}
-        onLoad={handleLoadProject}
-        onDelete={handleDeleteProject}
-        listProjects={listProjects}
-        disabled={clips.length === 0}
-      />
     </div>
   )
 }

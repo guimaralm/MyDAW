@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { LoopRegion } from '../../App'
+import { describeTrack } from '../../lib/stemColors'
 import type { Clip, Track } from '../../types/project'
+import { Button, ToolbarDivider } from '../ui/Button'
 import { ClipBox } from './ClipBox'
 
-const LANE_H = 88
-const RULER_H = 24
-const HEADER_W = 184
+const LANE_H = 84
+const RULER_H = 26
+const HEADER_W = 190
 
 export interface RangeSelection {
   clipId: string
@@ -46,19 +48,153 @@ interface ArrangementViewProps {
 const linToDb = (lin: number) => (lin <= 0.001 ? -60 : 20 * Math.log10(lin))
 const dbToLin = (db: number) => (db <= -60 ? 0 : Math.pow(10, db / 20))
 
-function Ruler({ duration, pps }: { duration: number; pps: number }) {
-  const step = pps >= 60 ? 1 : pps >= 20 ? 5 : 10
-  const ticks: number[] = []
-  for (let t = 0; t <= duration + step; t += step) ticks.push(t)
+function formatTime(t: number): string {
+  const m = Math.floor(t / 60)
+  const s = Math.floor(t % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+/** Time ruler with a major/minor tick density chosen to suit the current zoom. */
+function Ruler({ duration, pps, width }: { duration: number; pps: number; width: number }) {
+  const major = pps >= 120 ? 1 : pps >= 60 ? 2 : pps >= 25 ? 5 : pps >= 12 ? 10 : 30
+  const minor = major / (major >= 5 ? 5 : 2)
+  const ticks: { t: number; major: boolean }[] = []
+  for (let t = 0; t <= duration + major; t += minor) {
+    ticks.push({ t, major: Math.abs(t / major - Math.round(t / major)) < 1e-6 })
+  }
   return (
-    <div className="relative border-b border-neutral-700" style={{ height: RULER_H }}>
-      {ticks.map((t) => (
-        <div key={t} className="absolute top-0 h-full border-l border-neutral-700" style={{ left: t * pps }}>
-          <span className="ml-1 text-[9px] text-neutral-500">
-            {Math.floor(t / 60)}:{(t % 60).toString().padStart(2, '0')}
-          </span>
+    <div className="relative" style={{ width, height: RULER_H }}>
+      {ticks.map(({ t, major: isMajor }) => (
+        <div
+          key={t}
+          className="absolute bottom-0"
+          style={{
+            left: t * pps,
+            height: isMajor ? 10 : 5,
+            width: 1,
+            background: isMajor ? 'var(--border-strong)' : 'var(--border)',
+          }}
+        >
+          {isMajor && (
+            <span className="tnum absolute -top-[13px] left-1 whitespace-nowrap text-[9px] text-[var(--text-faint)]">
+              {formatTime(t)}
+            </span>
+          )}
         </div>
       ))}
+    </div>
+  )
+}
+
+function TrackHeader({
+  track,
+  silenced,
+  onVolumeChange,
+  onPanChange,
+  onToggleMute,
+  onToggleSolo,
+  onRemove,
+}: {
+  track: Track
+  silenced: boolean
+  onVolumeChange: (v: number) => void
+  onPanChange: (v: number) => void
+  onToggleMute: () => void
+  onToggleSolo: () => void
+  onRemove: () => void
+}) {
+  const { title, subtitle, color } = describeTrack(track.name)
+  const db = linToDb(track.volume)
+
+  return (
+    <div
+      className={`group relative flex flex-col justify-center gap-1.5 border-b border-r border-[var(--border)] bg-[var(--bg-panel)] pl-3 pr-2 ${
+        silenced ? 'opacity-50' : ''
+      }`}
+      style={{ height: LANE_H, width: HEADER_W }}
+    >
+      {/* Colour spine ties the lane header to its waveform colour. */}
+      <div className="absolute left-0 top-0 h-full w-[3px]" style={{ background: color }} />
+
+      <div className="flex items-center justify-between gap-1">
+        <span className="truncate text-xs font-medium text-[var(--text)]" title={track.name}>
+          {title}
+        </span>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={onToggleMute}
+            title="Mute"
+            className={`h-[18px] w-[18px] rounded text-[10px] font-semibold transition-colors ${
+              track.muted
+                ? 'bg-[var(--danger)] text-white'
+                : 'bg-[var(--bg-raised)] text-[var(--text-faint)] hover:text-[var(--text)]'
+            }`}
+          >
+            M
+          </button>
+          <button
+            type="button"
+            onClick={onToggleSolo}
+            title="Solo"
+            className={`h-[18px] w-[18px] rounded text-[10px] font-semibold transition-colors ${
+              track.soloed
+                ? 'bg-[var(--warn)] text-black'
+                : 'bg-[var(--bg-raised)] text-[var(--text-faint)] hover:text-[var(--text)]'
+            }`}
+          >
+            S
+          </button>
+          <button
+            type="button"
+            onClick={onRemove}
+            title="Remove track"
+            className="text-[11px] text-[var(--text-faint)] opacity-0 transition-opacity hover:text-[var(--danger)] group-hover:opacity-100"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1.5">
+        <input
+          type="range"
+          min={-60}
+          max={6}
+          step={0.5}
+          value={db}
+          onChange={(e) => onVolumeChange(dbToLin(Number(e.target.value)))}
+          onDoubleClick={() => onVolumeChange(1)}
+          className="w-full"
+          style={{ accentColor: color }}
+          title="Volume (double-click for 0 dB)"
+        />
+        <span className="tnum w-8 shrink-0 text-right text-[10px] text-[var(--text-faint)]">
+          {db <= -60 ? '−∞' : db.toFixed(0)}
+        </span>
+      </div>
+
+      {/* Pan replaces the source label on hover, so the header stays calm at rest. */}
+      <div className="relative h-3">
+        <span className="absolute inset-0 truncate text-[10px] text-[var(--text-faint)] transition-opacity group-hover:opacity-0">
+          {subtitle}
+        </span>
+        <div className="absolute inset-0 flex items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+          <span className="text-[9px] uppercase text-[var(--text-faint)]">pan</span>
+          <input
+            type="range"
+            min={-1}
+            max={1}
+            step={0.05}
+            value={track.pan ?? 0}
+            onChange={(e) => onPanChange(Number(e.target.value))}
+            onDoubleClick={() => onPanChange(0)}
+            className="h-1 w-full"
+            style={{ accentColor: 'var(--text-dim)' }}
+            title="Pan (double-click to centre)"
+          />
+        </div>
+      </div>
     </div>
   )
 }
@@ -67,30 +203,45 @@ export function ArrangementView(props: ArrangementViewProps) {
   const { tracks, clips, currentTime, isPlaying, selectedClipId, selection, loop } = props
   const [pps, setPps] = useState(40)
   const [follow, setFollow] = useState(true)
-  const innerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const zoomAnchor = useRef<{ time: number; cursorX: number } | null>(null)
 
   const duration = clips.reduce((m, c) => Math.max(m, c.timelineStart + c.duration), 0)
-  const totalWidth = Math.max(400, (duration + 4) * pps)
-  const totalHeight = RULER_H + tracks.length * LANE_H
+  const lanesWidth = Math.max(600, (duration + 4) * pps)
+  const contentHeight = RULER_H + tracks.length * LANE_H
   const anySolo = tracks.some((t) => t.soloed)
 
+  // Keep the playhead in view while playing.
   useEffect(() => {
     if (!follow || !isPlaying || !scrollRef.current) return
     const el = scrollRef.current
-    const x = currentTime * pps
-    if (x < el.scrollLeft + 40 || x > el.scrollLeft + el.clientWidth - 40) {
+    const x = HEADER_W + currentTime * pps
+    if (x < el.scrollLeft + HEADER_W + 60 || x > el.scrollLeft + el.clientWidth - 60) {
       el.scrollLeft = x - el.clientWidth / 2
     }
   }, [currentTime, follow, isPlaying, pps])
 
+  // After zooming, pin the time that was under the cursor back under the cursor.
   useLayoutEffect(() => {
     if (!zoomAnchor.current || !scrollRef.current) return
     const { time, cursorX } = zoomAnchor.current
-    scrollRef.current.scrollLeft = time * pps - cursorX
+    scrollRef.current.scrollLeft = time * pps + HEADER_W - cursorX
     zoomAnchor.current = null
   }, [pps])
+
+  /** Absolute timeline seconds for a viewport x coordinate. */
+  function timeFromClientX(clientX: number): number {
+    const el = scrollRef.current
+    if (!el) return 0
+    const rect = el.getBoundingClientRect()
+    return Math.max(0, (clientX - rect.left + el.scrollLeft - HEADER_W) / pps)
+  }
+
+  function isOverHeaders(clientX: number): boolean {
+    const el = scrollRef.current
+    if (!el) return false
+    return clientX - el.getBoundingClientRect().left < HEADER_W
+  }
 
   function handleWheel(e: React.WheelEvent) {
     if (!e.ctrlKey && !e.metaKey) return
@@ -98,13 +249,13 @@ export function ArrangementView(props: ArrangementViewProps) {
     const el = scrollRef.current
     if (!el) return
     const cursorX = e.clientX - el.getBoundingClientRect().left
-    const time = (el.scrollLeft + cursorX) / pps
+    const time = (el.scrollLeft + cursorX - HEADER_W) / pps
     const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
-    const next = Math.max(10, Math.min(300, pps * factor))
     zoomAnchor.current = { time, cursorX }
-    setPps(next)
+    setPps(Math.max(6, Math.min(300, pps * factor)))
   }
 
+  /** Snap to the grid, other clip edges, or the playhead when within a few pixels. */
   function snap(time: number): number {
     const threshold = 8 / pps
     const grid = pps >= 60 ? 0.5 : pps >= 20 ? 1 : 5
@@ -122,22 +273,17 @@ export function ArrangementView(props: ArrangementViewProps) {
     return Math.max(0, best)
   }
 
-  function timeFromEvent(clientX: number): number {
-    const rect = innerRef.current!.getBoundingClientRect()
-    return Math.max(0, (clientX - rect.left) / pps)
-  }
-
   function handleBackgroundPointerDown(e: React.PointerEvent) {
-    if (e.button !== 0 || !innerRef.current) return
-    // Shift+drag sets the loop region; a plain click seeks and clears the selection.
+    if (e.button !== 0 || isOverHeaders(e.clientX)) return
+    // Shift+drag marks the loop region; a plain click seeks and clears the selection.
     if (e.shiftKey) {
-      const start = timeFromEvent(e.clientX)
+      const start = timeFromClientX(e.clientX)
       props.onLoopChange({ enabled: true, start, end: start })
-      function onMoveEvt(ev: PointerEvent) {
-        const t = timeFromEvent(ev.clientX)
+      const onMoveEvt = (ev: PointerEvent) => {
+        const t = timeFromClientX(ev.clientX)
         props.onLoopChange({ enabled: true, start: Math.min(start, t), end: Math.max(start, t) })
       }
-      function onUp() {
+      const onUp = () => {
         window.removeEventListener('pointermove', onMoveEvt)
         window.removeEventListener('pointerup', onUp)
       }
@@ -145,17 +291,15 @@ export function ArrangementView(props: ArrangementViewProps) {
       window.addEventListener('pointerup', onUp)
       return
     }
-    props.onSeek(timeFromEvent(e.clientX))
+    props.onSeek(timeFromClientX(e.clientX))
     props.onClearSelection()
   }
 
   function startPlayheadDrag(e: React.PointerEvent) {
     e.stopPropagation()
     props.onScrubStart()
-    function onMoveEvt(ev: PointerEvent) {
-      props.onSeek(timeFromEvent(ev.clientX))
-    }
-    function onUp() {
+    const onMoveEvt = (ev: PointerEvent) => props.onSeek(timeFromClientX(ev.clientX))
+    const onUp = () => {
       window.removeEventListener('pointermove', onMoveEvt)
       window.removeEventListener('pointerup', onUp)
       props.onScrubEnd()
@@ -164,159 +308,91 @@ export function ArrangementView(props: ArrangementViewProps) {
     window.addEventListener('pointerup', onUp)
   }
 
-  if (tracks.length === 0) {
-    return (
-      <p className="rounded bg-neutral-900 px-4 py-6 text-center text-xs text-neutral-500">
-        Todavía no hay pistas. Importá una o más canciones/stems arriba.
-      </p>
-    )
-  }
+  const playheadX = HEADER_W + currentTime * pps
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={props.onCutAtPlayhead}
-          className="rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
-          title="Cortar todas las pistas en el cursor (⌘E)"
-        >
-          Cortar en cursor
-        </button>
-        <button
-          type="button"
+    <div className="flex min-w-0 flex-1 flex-col">
+      {/* Edit toolbar — grouped by intent so actions, toggles and destructive commands differ. */}
+      <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-[var(--border)] bg-[var(--bg-panel)] px-3">
+        <Button size="sm" onClick={props.onCutAtPlayhead} title="Split every track at the cursor (⌘E)">
+          Cut at cursor
+        </Button>
+        <Button size="sm" disabled={!selection} onClick={props.onCropToSelection} title="Crop the song to the selection">
+          Crop
+        </Button>
+        <Button size="sm" onClick={props.onCropAllSong} title="Trim the start and end of the whole song">
+          Crop all song
+        </Button>
+        <ToolbarDivider />
+        <Button
+          size="sm"
+          variant="danger"
           disabled={!selectedClipId}
           onClick={() => selectedClipId && props.onDeleteClip(selectedClipId)}
-          className="rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-40"
         >
-          Borrar pieza
-        </button>
-        <button
-          type="button"
-          disabled={!selection}
-          onClick={props.onCropToSelection}
-          className="rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-40"
-          title="Recortar la canción a la selección actual"
-        >
-          Crop
-        </button>
-        <button
-          type="button"
-          onClick={props.onCropAllSong}
-          className="rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
-          title="Recortar inicio/fin de toda la canción"
-        >
-          Crop all song
-        </button>
-        <button
-          type="button"
-          onClick={() => setFollow((v) => !v)}
-          className={`rounded px-2 py-1 text-xs ${follow ? 'bg-purple-600 text-white' : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'}`}
-          title="Seguir el cursor de reproducción"
-        >
-          Seguir
-        </button>
-        <div className="ml-auto flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setPps((p) => Math.max(10, p - 10))}
-            className="rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
-          >
+          Delete piece
+        </Button>
+
+        <div className="ml-auto flex items-center gap-1.5">
+          <Button size="sm" active={follow} onClick={() => setFollow((v) => !v)} title="Keep the playhead in view">
+            Follow
+          </Button>
+          <ToolbarDivider />
+          <Button variant="ghost" size="sm" onClick={() => setPps((p) => Math.max(6, p / 1.3))} title="Zoom out">
             −
-          </button>
-          <span className="text-[10px] text-neutral-500">zoom</span>
-          <button
-            type="button"
-            onClick={() => setPps((p) => Math.min(300, p + 10))}
-            className="rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
-          >
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setPps((p) => Math.min(300, p * 1.3))} title="Zoom in">
             +
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="flex">
-        <div className="shrink-0" style={{ width: HEADER_W }}>
-          <div style={{ height: RULER_H }} />
+      {/* One scroller for both axes: headers stick left, ruler sticks top. */}
+      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto bg-[var(--bg-lane)]" onWheel={handleWheel}>
+        <div
+          className="relative min-w-full"
+          style={{ width: HEADER_W + lanesWidth, height: contentHeight }}
+          onPointerDown={handleBackgroundPointerDown}
+        >
+          <div className="sticky top-0 z-30 flex" style={{ height: RULER_H }}>
+            <div
+              className="sticky left-0 z-40 shrink-0 border-b border-r border-[var(--border)] bg-[var(--bg-panel)]"
+              style={{ width: HEADER_W }}
+            />
+            {/* flex-1 so the ruler and lanes still span the window when the song is short. */}
+            <div className="flex-1 border-b border-[var(--border)] bg-[var(--bg-panel)]" style={{ minWidth: lanesWidth }}>
+              <Ruler duration={duration} pps={pps} width={lanesWidth} />
+            </div>
+            {/* Time badge lives in the ruler row so it paints above the ticks but is still
+                clipped by the sticky header column when scrolled. */}
+            <div
+              className="tnum pointer-events-none absolute top-0 -translate-x-1/2 rounded-b px-1 text-[9px] font-medium text-white"
+              // Nudged so it isn't sliced in half by the sticky header column at time 0.
+              style={{ left: Math.max(playheadX, HEADER_W + 16), background: 'var(--accent)' }}
+            >
+              {formatTime(currentTime)}
+            </div>
+          </div>
+
           {tracks.map((track) => {
             const silenced = track.muted || (anySolo && !track.soloed)
             return (
-              <div
-                key={track.id}
-                className={`flex flex-col justify-center gap-1 border-b border-neutral-800 bg-neutral-800/40 px-2 ${silenced ? 'opacity-50' : ''}`}
-                style={{ height: LANE_H }}
-              >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="truncate text-xs text-neutral-200">{track.name}</span>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => props.onToggleMute(track.id)}
-                      className={`rounded px-1.5 text-[10px] ${track.muted ? 'bg-red-500 text-white' : 'bg-neutral-700 text-neutral-300'}`}
-                      title="Mute"
-                    >
-                      M
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => props.onToggleSolo(track.id)}
-                      className={`rounded px-1.5 text-[10px] ${track.soloed ? 'bg-yellow-400 text-black' : 'bg-neutral-700 text-neutral-300'}`}
-                      title="Solo"
-                    >
-                      S
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => props.onRemoveTrack(track.id)}
-                      className="rounded px-1 text-[10px] text-neutral-500 hover:text-red-400"
-                      title="Quitar pista"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="range"
-                    min={-60}
-                    max={6}
-                    step={0.5}
-                    value={linToDb(track.volume)}
-                    onChange={(e) => props.onVolumeChange(track.id, dbToLin(Number(e.target.value)))}
-                    onDoubleClick={() => props.onVolumeChange(track.id, 1)}
-                    className="w-full accent-purple-500"
-                    title="Volumen (doble-click = 0dB)"
-                  />
-                  <span className="w-10 shrink-0 text-right font-mono text-[9px] text-neutral-500">
-                    {linToDb(track.volume) <= -60 ? '-∞' : linToDb(track.volume).toFixed(0)}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-[8px] uppercase text-neutral-600">pan</span>
-                  <input
-                    type="range"
-                    min={-1}
-                    max={1}
-                    step={0.05}
-                    value={track.pan ?? 0}
-                    onChange={(e) => props.onPanChange(track.id, Number(e.target.value))}
-                    onDoubleClick={() => props.onPanChange(track.id, 0)}
-                    className="w-full accent-sky-500"
-                    title="Panorama (doble-click = centro)"
+              <div key={track.id} className="flex" style={{ height: LANE_H }}>
+                <div className="sticky left-0 z-20 shrink-0">
+                  <TrackHeader
+                    track={track}
+                    silenced={silenced}
+                    onVolumeChange={(v) => props.onVolumeChange(track.id, v)}
+                    onPanChange={(v) => props.onPanChange(track.id, v)}
+                    onToggleMute={() => props.onToggleMute(track.id)}
+                    onToggleSolo={() => props.onToggleSolo(track.id)}
+                    onRemove={() => props.onRemoveTrack(track.id)}
                   />
                 </div>
-              </div>
-            )
-          })}
-        </div>
-
-        <div className="flex-1 overflow-x-auto" ref={scrollRef} onWheel={handleWheel}>
-          <div ref={innerRef} className="relative" style={{ width: totalWidth }} onPointerDown={handleBackgroundPointerDown}>
-            <Ruler duration={duration} pps={pps} />
-            {tracks.map((track) => {
-              const silenced = track.muted || (anySolo && !track.soloed)
-              return (
-                <div key={track.id} className={`relative border-b border-neutral-800 ${silenced ? 'opacity-40' : ''}`} style={{ height: LANE_H }}>
+                <div
+                  className={`relative flex-1 border-b border-[var(--border)] ${silenced ? 'opacity-40' : ''}`}
+                  style={{ minWidth: lanesWidth, height: LANE_H }}
+                >
                   {clips
                     .filter((c) => c.trackId === track.id)
                     .map((clip) => (
@@ -326,8 +402,13 @@ export function ArrangementView(props: ArrangementViewProps) {
                         pps={pps}
                         height={LANE_H}
                         selected={clip.id === selectedClipId}
+                        color={describeTrack(track.name).color}
                         snap={snap}
-                        selectionRange={selection && selection.clipId === clip.id ? { start: selection.start, end: selection.end } : null}
+                        selectionRange={
+                          selection && selection.clipId === clip.id
+                            ? { start: selection.start, end: selection.end }
+                            : null
+                        }
                         onClipClick={props.onClipClick}
                         onSelectRange={props.onSelectRange}
                         onContextMenu={props.onClipContextMenu}
@@ -337,31 +418,34 @@ export function ArrangementView(props: ArrangementViewProps) {
                       />
                     ))}
                 </div>
-              )
-            })}
+              </div>
+            )
+          })}
 
-            {loop.end - loop.start > 0.01 && (
-              <div
-                className={`pointer-events-none absolute top-0 z-10 border-x ${loop.enabled ? 'border-purple-400 bg-purple-500/10' : 'border-neutral-600 bg-neutral-500/5'}`}
-                style={{ left: loop.start * pps, width: (loop.end - loop.start) * pps, height: totalHeight }}
-              />
-            )}
-
+          {loop.end - loop.start > 0.01 && (
             <div
-              onPointerDown={startPlayheadDrag}
-              className="group absolute top-0 z-20"
-              style={{ left: currentTime * pps - 4, width: 9, height: totalHeight, cursor: 'ew-resize' }}
-              title="Arrastrá para mover la línea de reproducción"
-            >
-              <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white group-hover:bg-purple-300" />
-              <div className="absolute left-1/2 top-0 h-2 w-2 -translate-x-1/2 rotate-45 bg-white group-hover:bg-purple-300" style={{ marginTop: -1 }} />
-            </div>
+              className={`pointer-events-none absolute top-0 z-10 border-x ${
+                loop.enabled ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border-strong)] bg-white/[0.03]'
+              }`}
+              style={{
+                left: HEADER_W + loop.start * pps,
+                width: (loop.end - loop.start) * pps,
+                height: contentHeight,
+              }}
+            />
+          )}
+
+          {/* Playhead: above clips, below the sticky lane headers and ruler. */}
+          <div
+            onPointerDown={startPlayheadDrag}
+            className="group absolute top-0 z-[15]"
+            style={{ left: playheadX - 5, width: 11, height: contentHeight, cursor: 'ew-resize' }}
+            title="Drag to move the playhead"
+          >
+            <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/90 transition-colors group-hover:bg-[var(--accent)]" />
           </div>
         </div>
       </div>
-      <p className="text-[10px] text-neutral-600">
-        Arrastrar sobre un clip = seleccionar trozo · click derecho = acciones · Espacio = play · ⌘E = cortar en cursor · Supr = borrar · Shift+arrastrar = loop · ⌘/pinch+scroll = zoom
-      </p>
     </div>
   )
 }
