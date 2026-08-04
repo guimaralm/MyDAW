@@ -2,6 +2,7 @@ const SHORTCUTS: { keys: string; label: string }[] = [
   { keys: 'Space', label: 'Play / pause' },
   { keys: 'Home', label: 'Back to start' },
   { keys: '⌘E', label: 'Cut all tracks at the cursor' },
+  { keys: '⌘D', label: 'Duplicate the selection onto a new lane' },
   { keys: 'Delete', label: 'Delete selection, or the selected piece' },
   { keys: '⌘Z / ⇧⌘Z', label: 'Undo / redo' },
   { keys: 'Esc', label: 'Clear selection' },

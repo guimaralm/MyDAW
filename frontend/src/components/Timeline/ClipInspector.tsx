@@ -1,3 +1,4 @@
+import { startCoalescedDrag } from '../../stores/projectStore'
 import type { Clip } from '../../types/project'
 import { Button } from '../ui/Button'
 
@@ -47,6 +48,7 @@ export function ClipInspector({ clip, onFadeChange, onGainChange, onToggleMuted 
           max={12}
           step={0.5}
           value={clip.gainDb ?? 0}
+          onPointerDown={startCoalescedDrag}
           onChange={(e) => onGainChange(Number(e.target.value))}
           onDoubleClick={() => onGainChange(0)}
           className="w-28"

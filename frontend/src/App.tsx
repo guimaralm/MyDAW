@@ -46,6 +46,7 @@ function App() {
   const silenceRange = useProjectStore((s) => s.silenceRange)
   const deleteRange = useProjectStore((s) => s.deleteRange)
   const moveRangeToNewTrack = useProjectStore((s) => s.moveRangeToNewTrack)
+  const duplicateRangeToNewTrack = useProjectStore((s) => s.duplicateRangeToNewTrack)
   const removeClip = useProjectStore((s) => s.removeClip)
   const moveClipToNewTrack = useProjectStore((s) => s.moveClipToNewTrack)
   const cropSong = useProjectStore((s) => s.cropSong)
@@ -233,6 +234,23 @@ function App() {
     setSelection(null)
   }
 
+  /** Copy the selected range onto a new lane at the same time, so it layers over the original. */
+  function actDuplicateRange(clipId: string, a: number, b: number) {
+    const clip = clips.find((c) => c.id === clipId)
+    if (!clip) return
+    const source = tracks.find((t) => t.id === clip.trackId)
+    const newTrackId = crypto.randomUUID()
+    audioEngine.addTrack(newTrackId, source?.volume ?? 1, source?.pan ?? 0)
+    duplicateRangeToNewTrack(
+      clip.trackId,
+      a,
+      b,
+      newTrackId,
+      source ? `${source.name} (copy)` : 'copy',
+      crypto.randomUUID(),
+    )
+  }
+
   function actSplitAt(clipId: string, time: number) {
     splitClip(clipId, time, crypto.randomUUID())
   }
@@ -252,6 +270,7 @@ function App() {
     if (selection && selection.clipId === clipId && selection.end - selection.start > 0.01) {
       const { start, end } = selection
       items.push(
+        { label: 'Duplicate selection (⌘D)', onClick: () => actDuplicateRange(clipId, start, end) },
         { label: 'Move selection to new track', onClick: () => actMoveRangeToNewTrack(clipId, start, end) },
         { label: 'Silence selection', onClick: () => actSilenceRange(clipId, start, end) },
         { label: 'Delete selection', onClick: () => actDeleteRange(clipId, start, end), danger: true },
@@ -376,6 +395,11 @@ function App() {
       } else if (mod && e.key.toLowerCase() === 'e') {
         e.preventDefault()
         handleCutAtPlayhead()
+      } else if (mod && e.key.toLowerCase() === 'd') {
+        if (selection && selection.end - selection.start > 0.01) {
+          e.preventDefault()
+          actDuplicateRange(selection.clipId, selection.start, selection.end)
+        }
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         // Prefer deleting the range selection; otherwise the whole selected piece.
         if (selection && selection.end - selection.start > 0.01) {

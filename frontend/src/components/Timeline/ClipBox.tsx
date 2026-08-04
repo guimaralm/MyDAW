@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { bufferCache } from '../../audio-engine/bufferCache'
 import { getCachedPeaks, normalizationScale } from '../../audio-engine/waveformPeaks'
+import { startCoalescedDrag } from '../../stores/projectStore'
 import type { Clip } from '../../types/project'
 
 interface ClipBoxProps {
@@ -140,6 +141,8 @@ function ClipBoxImpl({
 
   function beginFadeDrag(e: React.PointerEvent, side: 'in' | 'out') {
     e.stopPropagation()
+    // A fade drag fires on every move; coalesce it into one undo step.
+    startCoalescedDrag()
     function onMoveEvt(ev: PointerEvent) {
       const rect = boxRef.current!.getBoundingClientRect()
       const localSec = (ev.clientX - rect.left) / pps

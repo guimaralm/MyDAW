@@ -4,6 +4,27 @@ import type { Track, Clip } from '../types/project'
 
 const MIN_CLIP_DURATION = 0.05
 
+// Continuous controls (volume, pan, clip gain, fade handles) fire on every pointer move, so a
+// single fader drag used to push dozens of history entries — making Undo look broken, since it
+// stepped back one imperceptible increment at a time. During a coalesced session we keep only
+// the state from *before* the drag started, so one drag == one undo step.
+let coalescing = false
+let coalescedThisSession = false
+
+/** Call on pointerdown of a continuous control; ends automatically on pointerup. */
+export function startCoalescedDrag(): void {
+  coalescing = true
+  coalescedThisSession = false
+  const end = () => {
+    coalescing = false
+    coalescedThisSession = false
+    window.removeEventListener('pointerup', end)
+    window.removeEventListener('pointercancel', end)
+  }
+  window.addEventListener('pointerup', end)
+  window.addEventListener('pointercancel', end)
+}
+
 interface ProjectState {
   tracks: Track[]
   clips: Clip[]
@@ -27,6 +48,15 @@ interface ProjectState {
   silenceRange: (trackId: string, a: number, b: number, newIds: [string, string]) => void
   /** Delete a time range [a,b] in place: split at both edges, remove the middle piece (leaves silence). */
   deleteRange: (trackId: string, a: number, b: number, newIds: [string, string]) => void
+  /** Copy a time range [a,b] onto a new lane at the same position, leaving the original intact. */
+  duplicateRangeToNewTrack: (
+    trackId: string,
+    a: number,
+    b: number,
+    newTrackId: string,
+    newName: string,
+    newClipId: string,
+  ) => void
   /** Extract a time range [a,b] to a brand-new track lane at the same timeline position. */
   moveRangeToNewTrack: (
     trackId: string,
@@ -126,6 +156,40 @@ export const useProjectStore = create<ProjectState>()(
           return { clips: res.list.filter((c) => c.id !== newIds[0]) }
         }),
 
+      // Layering, not splitting: the source clip is untouched and the copy plays on top at the
+      // same time position, so stems stay aligned and nothing overlaps on the original lane.
+      duplicateRangeToNewTrack: (trackId, a, b, newTrackId, newName, newClipId) =>
+        set((s) => {
+          const lo = Math.min(a, b)
+          const hi = Math.max(a, b)
+          if (hi - lo < MIN_CLIP_DURATION) return s
+          const clip = s.clips.find(
+            (c) => c.trackId === trackId && c.timelineStart <= lo && c.timelineStart + c.duration >= hi,
+          )
+          if (!clip) return s
+          const source = s.tracks.find((t) => t.id === trackId)
+          const newTrack: Track = {
+            id: newTrackId,
+            name: newName,
+            volume: source?.volume ?? 1,
+            muted: false,
+            soloed: false,
+            pan: source?.pan ?? 0,
+          }
+          const copy: Clip = {
+            ...clip,
+            id: newClipId,
+            trackId: newTrackId,
+            timelineStart: lo,
+            bufferOffset: clip.bufferOffset + (lo - clip.timelineStart),
+            duration: hi - lo,
+            fadeIn: 0,
+            fadeOut: 0,
+            muted: false,
+          }
+          return { tracks: [...s.tracks, newTrack], clips: [...s.clips, copy] }
+        }),
+
       moveRangeToNewTrack: (trackId, a, b, newTrackId, newName, newIds) =>
         set((s) => {
           const res = splitInThree(s.clips, trackId, a, b, newIds[0], newIds[1])
@@ -197,7 +261,16 @@ export const useProjectStore = create<ProjectState>()(
           }
         }),
     }),
-    { limit: 50 },
+    {
+      limit: 50,
+      handleSet: (handleSet) => (pastState, replace) => {
+        if (coalescing) {
+          if (coalescedThisSession) return
+          coalescedThisSession = true
+        }
+        handleSet(pastState, replace)
+      },
+    },
   ),
 )
 
