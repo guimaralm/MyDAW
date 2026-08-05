@@ -66,6 +66,8 @@ interface ProjectState {
     newName: string,
     newIds: [string, string],
   ) => void
+  /** Reposition a piece in time, staying on its own lane. */
+  setClipTimelineStart: (clipId: string, timelineStart: number) => void
   setClipMuted: (clipId: string, muted: boolean) => void
   /** Crop the whole song to [start,end] across all tracks, re-basing so it begins at 0. */
   cropSong: (start: number, end: number) => void
@@ -208,6 +210,11 @@ export const useProjectStore = create<ProjectState>()(
             clips: res.list.map((c) => (c.id === newIds[0] ? { ...c, trackId: newTrackId } : c)),
           }
         }),
+
+      setClipTimelineStart: (clipId, timelineStart) =>
+        set((s) => ({
+          clips: s.clips.map((c) => (c.id === clipId ? { ...c, timelineStart: Math.max(0, timelineStart) } : c)),
+        })),
 
       setClipMuted: (clipId, muted) =>
         set((s) => ({ clips: s.clips.map((c) => (c.id === clipId ? { ...c, muted } : c)) })),

@@ -16,6 +16,8 @@ interface ClipBoxProps {
   selectionRange: { start: number; end: number } | null
   onClipClick: (clipId: string, timeAtClick: number) => void
   onSelectRange: (clipId: string, a: number, b: number) => void
+  /** Alt+drag committed a new position for the whole piece. */
+  onMoveInTime: (clipId: string, newTimelineStart: number) => void
   onContextMenu: (clipId: string, timeAtClick: number, clientX: number, clientY: number) => void
   onTrimLeft: (clipId: string, newBufferOffset: number) => void
   onTrimRight: (clipId: string, newBufferEnd: number) => void
@@ -25,7 +27,7 @@ interface ClipBoxProps {
 const EDGE_PX = 6
 const CLICK_THRESHOLD_PX = 3
 
-type DragMode = 'none' | 'trimL' | 'trimR' | 'select'
+type DragMode = 'none' | 'trimL' | 'trimR' | 'select' | 'moveTime'
 
 function ClipBoxImpl({
   clip,
@@ -37,6 +39,7 @@ function ClipBoxImpl({
   selectionRange,
   onClipClick,
   onSelectRange,
+  onMoveInTime,
   onContextMenu,
   onTrimLeft,
   onTrimRight,
@@ -121,7 +124,11 @@ function ClipBoxImpl({
       setDeltaSec(0)
       setDragSel(null)
 
-      if (mode === 'select') {
+      if (mode === 'moveTime') {
+        if (Math.abs(dPx) >= CLICK_THRESHOLD_PX) {
+          onMoveInTime(clip.id, snap(Math.max(0, clip.timelineStart + dSec)))
+        }
+      } else if (mode === 'select') {
         if (Math.abs(dPx) < CLICK_THRESHOLD_PX) {
           onClipClick(clip.id, startTime)
         } else {
@@ -161,7 +168,9 @@ function ClipBoxImpl({
     if (e.button !== 0) return // let right-click go to onContextMenu
     const rect = boxRef.current!.getBoundingClientRect()
     const localX = e.clientX - rect.left
-    if (localX <= EDGE_PX) beginDrag(e, 'trimL')
+    // Alt+drag slides the whole piece in time; a plain drag selects a range.
+    if (e.altKey) beginDrag(e, 'moveTime')
+    else if (localX <= EDGE_PX) beginDrag(e, 'trimL')
     else if (localX >= rect.width - EDGE_PX) beginDrag(e, 'trimR')
     else beginDrag(e, 'select')
   }
@@ -174,7 +183,9 @@ function ClipBoxImpl({
 
   let renderLeft = clip.timelineStart * pps
   let renderWidth = width
-  if (dragMode === 'trimL') {
+  if (dragMode === 'moveTime') {
+    renderLeft = Math.max(0, clip.timelineStart + deltaSec) * pps
+  } else if (dragMode === 'trimL') {
     renderLeft = (clip.timelineStart + deltaSec) * pps
     renderWidth = Math.max(2, (clip.duration - deltaSec) * pps)
   } else if (dragMode === 'trimR') {

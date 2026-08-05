@@ -48,6 +48,7 @@ function App() {
   const moveRangeToNewTrack = useProjectStore((s) => s.moveRangeToNewTrack)
   const duplicateRangeToNewTrack = useProjectStore((s) => s.duplicateRangeToNewTrack)
   const removeClip = useProjectStore((s) => s.removeClip)
+  const setClipTimelineStart = useProjectStore((s) => s.setClipTimelineStart)
   const moveClipToNewTrack = useProjectStore((s) => s.moveClipToNewTrack)
   const cropSong = useProjectStore((s) => s.cropSong)
 
@@ -251,6 +252,34 @@ function App() {
     )
   }
 
+  /**
+   * Reposition a piece in time. It keeps its own lane unless landing there would cover audio
+   * already on it, in which case it gets a fresh lane so nothing is hidden.
+   */
+  function moveClipToTime(clipId: string, rawStart: number) {
+    const clip = clips.find((c) => c.id === clipId)
+    if (!clip) return
+    const start = Math.max(0, rawStart)
+    const end = start + clip.duration
+    const overlaps = clips.some(
+      (c) =>
+        c.id !== clipId &&
+        c.trackId === clip.trackId &&
+        c.timelineStart < end &&
+        start < c.timelineStart + c.duration,
+    )
+    if (!overlaps) {
+      setClipTimelineStart(clipId, start)
+      return
+    }
+    const source = tracks.find((t) => t.id === clip.trackId)
+    const newTrackId = crypto.randomUUID()
+    audioEngine.addTrack(newTrackId, source?.volume ?? 1, source?.pan ?? 0)
+    // Avoid stacking suffixes like "(copy) (moved)".
+    const name = source ? (source.name.includes('(') ? source.name : `${source.name} (moved)`) : 'moved'
+    moveClipToNewTrack(clipId, newTrackId, name, start)
+  }
+
   function actSplitAt(clipId: string, time: number) {
     splitClip(clipId, time, crypto.randomUUID())
   }
@@ -276,7 +305,13 @@ function App() {
         { label: 'Delete selection', onClick: () => actDeleteRange(clipId, start, end), danger: true },
       )
     }
+    const playhead = audioEngine.getCurrentTime()
+    const mm = Math.floor(playhead / 60)
+    const ss = Math.floor(playhead % 60)
+      .toString()
+      .padStart(2, '0')
     items.push(
+      { label: `Move piece to playhead (${mm}:${ss})`, onClick: () => moveClipToTime(clipId, playhead) },
       { label: 'Split here', onClick: () => actSplitAt(clipId, time) },
       { label: 'Move piece to new track', onClick: () => actMoveClipToNewTrack(clipId) },
       {
@@ -539,6 +574,7 @@ function App() {
               loop={loop}
               onClipClick={handleClipClick}
               onSelectRange={handleSelectRange}
+              onMoveInTime={moveClipToTime}
               onClipContextMenu={handleClipContextMenu}
               onSeek={handleSeek}
               onScrubStart={handleScrubStart}

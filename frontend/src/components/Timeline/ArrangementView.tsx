@@ -26,6 +26,7 @@ interface ArrangementViewProps {
   loop: LoopRegion
   onClipClick: (clipId: string, timeAtClick: number) => void
   onSelectRange: (clipId: string, a: number, b: number) => void
+  onMoveInTime: (clipId: string, newTimelineStart: number) => void
   onClipContextMenu: (clipId: string, timeAtClick: number, clientX: number, clientY: number) => void
   onSeek: (seconds: number) => void
   onScrubStart: () => void
@@ -414,6 +415,7 @@ export function ArrangementView(props: ArrangementViewProps) {
                         }
                         onClipClick={props.onClipClick}
                         onSelectRange={props.onSelectRange}
+                        onMoveInTime={props.onMoveInTime}
                         onContextMenu={props.onClipContextMenu}
                         onTrimLeft={props.onTrimLeft}
                         onTrimRight={props.onTrimRight}

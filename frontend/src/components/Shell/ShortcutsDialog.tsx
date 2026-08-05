@@ -9,6 +9,7 @@ const SHORTCUTS: { keys: string; label: string }[] = [
   { keys: 'Drag on a clip', label: 'Select a range' },
   { keys: 'Right-click', label: 'Actions for the piece or selection' },
   { keys: 'Drag clip edges', label: 'Trim' },
+  { keys: 'Alt + drag', label: 'Slide a piece in time' },
   { keys: 'Shift + drag', label: 'Set the loop region' },
   { keys: '⌘ + scroll', label: 'Zoom at the pointer' },
 ]
