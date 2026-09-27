@@ -46,7 +46,9 @@ function App() {
   const silenceRange = useProjectStore((s) => s.silenceRange)
   const deleteRange = useProjectStore((s) => s.deleteRange)
   const moveRangeToNewTrack = useProjectStore((s) => s.moveRangeToNewTrack)
+  const duplicateRangeToNewTrack = useProjectStore((s) => s.duplicateRangeToNewTrack)
   const removeClip = useProjectStore((s) => s.removeClip)
+  const setClipTimelineStart = useProjectStore((s) => s.setClipTimelineStart)
   const moveClipToNewTrack = useProjectStore((s) => s.moveClipToNewTrack)
   const cropSong = useProjectStore((s) => s.cropSong)
 
@@ -233,6 +235,51 @@ function App() {
     setSelection(null)
   }
 
+  /** Copy the selected range onto a new lane at the same time, so it layers over the original. */
+  function actDuplicateRange(clipId: string, a: number, b: number) {
+    const clip = clips.find((c) => c.id === clipId)
+    if (!clip) return
+    const source = tracks.find((t) => t.id === clip.trackId)
+    const newTrackId = crypto.randomUUID()
+    audioEngine.addTrack(newTrackId, source?.volume ?? 1, source?.pan ?? 0)
+    duplicateRangeToNewTrack(
+      clip.trackId,
+      a,
+      b,
+      newTrackId,
+      source ? `${source.name} (copy)` : 'copy',
+      crypto.randomUUID(),
+    )
+  }
+
+  /**
+   * Reposition a piece in time. It keeps its own lane unless landing there would cover audio
+   * already on it, in which case it gets a fresh lane so nothing is hidden.
+   */
+  function moveClipToTime(clipId: string, rawStart: number) {
+    const clip = clips.find((c) => c.id === clipId)
+    if (!clip) return
+    const start = Math.max(0, rawStart)
+    const end = start + clip.duration
+    const overlaps = clips.some(
+      (c) =>
+        c.id !== clipId &&
+        c.trackId === clip.trackId &&
+        c.timelineStart < end &&
+        start < c.timelineStart + c.duration,
+    )
+    if (!overlaps) {
+      setClipTimelineStart(clipId, start)
+      return
+    }
+    const source = tracks.find((t) => t.id === clip.trackId)
+    const newTrackId = crypto.randomUUID()
+    audioEngine.addTrack(newTrackId, source?.volume ?? 1, source?.pan ?? 0)
+    // Avoid stacking suffixes like "(copy) (moved)".
+    const name = source ? (source.name.includes('(') ? source.name : `${source.name} (moved)`) : 'moved'
+    moveClipToNewTrack(clipId, newTrackId, name, start)
+  }
+
   function actSplitAt(clipId: string, time: number) {
     splitClip(clipId, time, crypto.randomUUID())
   }
@@ -252,12 +299,19 @@ function App() {
     if (selection && selection.clipId === clipId && selection.end - selection.start > 0.01) {
       const { start, end } = selection
       items.push(
+        { label: 'Duplicate selection (⌘D)', onClick: () => actDuplicateRange(clipId, start, end) },
         { label: 'Move selection to new track', onClick: () => actMoveRangeToNewTrack(clipId, start, end) },
         { label: 'Silence selection', onClick: () => actSilenceRange(clipId, start, end) },
         { label: 'Delete selection', onClick: () => actDeleteRange(clipId, start, end), danger: true },
       )
     }
+    const playhead = audioEngine.getCurrentTime()
+    const mm = Math.floor(playhead / 60)
+    const ss = Math.floor(playhead % 60)
+      .toString()
+      .padStart(2, '0')
     items.push(
+      { label: `Move piece to playhead (${mm}:${ss})`, onClick: () => moveClipToTime(clipId, playhead) },
       { label: 'Split here', onClick: () => actSplitAt(clipId, time) },
       { label: 'Move piece to new track', onClick: () => actMoveClipToNewTrack(clipId) },
       {
@@ -376,6 +430,11 @@ function App() {
       } else if (mod && e.key.toLowerCase() === 'e') {
         e.preventDefault()
         handleCutAtPlayhead()
+      } else if (mod && e.key.toLowerCase() === 'd') {
+        if (selection && selection.end - selection.start > 0.01) {
+          e.preventDefault()
+          actDuplicateRange(selection.clipId, selection.start, selection.end)
+        }
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         // Prefer deleting the range selection; otherwise the whole selected piece.
         if (selection && selection.end - selection.start > 0.01) {
@@ -463,7 +522,8 @@ function App() {
     useProjectStore.setState({ tracks: result.record.tracks, clips: result.record.clips })
     useProjectStore.temporal.getState().clear()
 
-    const m = { masterGainDb: 0, ...result.record.mastering }
+    const stored = result.record.mastering
+    const m = { ...stored, masterGainDb: stored.masterGainDb ?? 0 }
     useMasteringStore.setState(m)
     audioEngine.setEqGainDb('low', m.eqLowDb)
     audioEngine.setEqGainDb('mid', m.eqMidDb)
@@ -515,6 +575,7 @@ function App() {
               loop={loop}
               onClipClick={handleClipClick}
               onSelectRange={handleSelectRange}
+              onMoveInTime={moveClipToTime}
               onClipContextMenu={handleClipContextMenu}
               onSeek={handleSeek}
               onScrubStart={handleScrubStart}

@@ -3,6 +3,8 @@
 // via importScripts — this is a classic (non-module) worker for that reason, and it must
 // not import types from other files either (Vite's classic-worker dev transform chokes on
 // the `export` in the imported file), so request/response shapes are typed inline here.
+declare function importScripts(...urls: string[]): void
+
 importScripts('/vendor/lame.all.js')
 
 declare const lamejs: {

@@ -27,8 +27,10 @@ export function describeTrack(name: string): StemLabel {
   const tail = rest.join(' · ')
   if (!tail) return { title: name, subtitle: '', color: DEFAULT_COLOR }
 
-  const movedSuffix = tail.match(/\s*\(moved\)|\s*\(movido\)/i)?.[0] ?? ''
-  const kind = tail.replace(/\s*\((moved|movido)\)/i, '').trim().toLowerCase()
+  // Derived lanes carry a suffix like "(moved)" or "(copy)"; keep it but colour by stem kind.
+  const SUFFIX = /\s*\((moved|movido|copy)\)/i
+  const movedSuffix = tail.match(SUFFIX)?.[0] ?? ''
+  const kind = tail.replace(SUFFIX, '').trim().toLowerCase()
   const style = STEM_STYLES[kind]
   return {
     title: (style?.title ?? kind.charAt(0).toUpperCase() + kind.slice(1)) + movedSuffix,

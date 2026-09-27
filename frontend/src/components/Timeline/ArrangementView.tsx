@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { LoopRegion } from '../../App'
 import { describeTrack } from '../../lib/stemColors'
+import { startCoalescedDrag } from '../../stores/projectStore'
 import type { Clip, Track } from '../../types/project'
 import { Button, ToolbarDivider } from '../ui/Button'
 import { ClipBox } from './ClipBox'
@@ -25,6 +26,7 @@ interface ArrangementViewProps {
   loop: LoopRegion
   onClipClick: (clipId: string, timeAtClick: number) => void
   onSelectRange: (clipId: string, a: number, b: number) => void
+  onMoveInTime: (clipId: string, newTimelineStart: number) => void
   onClipContextMenu: (clipId: string, timeAtClick: number, clientX: number, clientY: number) => void
   onSeek: (seconds: number) => void
   onScrubStart: () => void
@@ -163,6 +165,7 @@ function TrackHeader({
           max={6}
           step={0.5}
           value={db}
+          onPointerDown={startCoalescedDrag}
           onChange={(e) => onVolumeChange(dbToLin(Number(e.target.value)))}
           onDoubleClick={() => onVolumeChange(1)}
           className="w-full"
@@ -187,6 +190,7 @@ function TrackHeader({
             max={1}
             step={0.05}
             value={track.pan ?? 0}
+            onPointerDown={startCoalescedDrag}
             onChange={(e) => onPanChange(Number(e.target.value))}
             onDoubleClick={() => onPanChange(0)}
             className="h-1 w-full"
@@ -411,6 +415,7 @@ export function ArrangementView(props: ArrangementViewProps) {
                         }
                         onClipClick={props.onClipClick}
                         onSelectRange={props.onSelectRange}
+                        onMoveInTime={props.onMoveInTime}
                         onContextMenu={props.onClipContextMenu}
                         onTrimLeft={props.onTrimLeft}
                         onTrimRight={props.onTrimRight}
