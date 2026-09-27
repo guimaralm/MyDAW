@@ -522,7 +522,8 @@ function App() {
     useProjectStore.setState({ tracks: result.record.tracks, clips: result.record.clips })
     useProjectStore.temporal.getState().clear()
 
-    const m = { masterGainDb: 0, ...result.record.mastering }
+    const stored = result.record.mastering
+    const m = { ...stored, masterGainDb: stored.masterGainDb ?? 0 }
     useMasteringStore.setState(m)
     audioEngine.setEqGainDb('low', m.eqLowDb)
     audioEngine.setEqGainDb('mid', m.eqMidDb)

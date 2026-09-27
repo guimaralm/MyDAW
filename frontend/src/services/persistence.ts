@@ -8,7 +8,8 @@ export interface MasteringSettings {
   compressorThreshold: number
   compressorRatio: number
   limiterCeilingDb: number
-  masterGainDb: number
+  /** Absent in projects saved before the master gain control existed. */
+  masterGainDb?: number
 }
 
 export interface ProjectRecord {
@@ -22,7 +23,7 @@ export interface ProjectRecord {
 }
 
 interface StoredBuffer {
-  channels: Float32Array[]
+  channels: Float32Array<ArrayBuffer>[]
   sampleRate: number
   length: number
   numberOfChannels: number
@@ -57,7 +58,7 @@ export async function saveProject(record: ProjectRecord, buffers: Map<string, Au
   for (const bufferId of record.bufferIds) {
     const buffer = buffers.get(bufferId)
     if (!buffer) continue
-    const channels: Float32Array[] = []
+    const channels: Float32Array<ArrayBuffer>[] = []
     for (let ch = 0; ch < buffer.numberOfChannels; ch++) channels.push(buffer.getChannelData(ch).slice())
     await tx.objectStore('blobs').put(
       { channels, sampleRate: buffer.sampleRate, length: buffer.length, numberOfChannels: buffer.numberOfChannels },
