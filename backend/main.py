@@ -1,3 +1,5 @@
+import os
+
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -7,9 +9,17 @@ from models import JobRecord
 
 app = FastAPI(title="MyDAW stem-separation service")
 
+# The local dev frontend is always allowed. A deployed frontend (e.g. on Vercel) must be listed
+# exactly, comma-separated, in ALLOWED_ORIGINS — deliberately no wildcard, since this service
+# accepts uploads and burns CPU on whoever calls it.
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    *(o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()),
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
